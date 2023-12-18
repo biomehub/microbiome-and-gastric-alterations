@@ -1,0 +1,145 @@
+---
+title: "Resumo de análise"
+author: ""
+date: "4/8/2022"
+output: 
+  html_document:
+    self_contained: yes
+    mode: selfcontained
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = FALSE, message = FALSE, warning = FALSE,
+  out.width = "80%",
+  out.height = "80%"
+)
+```
+
+
+O presente relatório descreve brevemente as análises realizadas com dados de dois estudos transversais prospectivos investigando associações entre microbioma oral e resultado de endoscopia. A partir de 284 indivíduos com metadados disponíveis, um total de 266 amostras foram aceitas para sequenciamento pelo laboratório e tiveram contagem de _reads_ acima de zero. 73 amostras correspondentes ao primeiro estudo, e 193 correspondentes ao segundo. Em termos gerais, os gêneros com maior abundância relativa foram Prevotella, Haemophilus e Fusobacterium. O filo mais abundante foi Bacteroidetes seguido por Proteobacteria. Não houve associação significativa entre status da endoscopia e métricas de alfa-diversidade (incluindo riqueza e índices de Shannon e Simpson Invertido). Análise de beta-diversidade (PCoA, dissimilaridade de Bray-Curtis) não revelou agrupamentos amostrais associados ao resultado da endoscopia. Análise de abundância diferencial, realizada com três softwares independentes e usando dados um múltiplos rankings taxonômicos, não detectou associações significativas entre status da endoscopia e abundância relativa das bactérias identificadas. Todas as análises foram feitas no R versão 4.1.2. Correção de múltiplas comparações foi realizada usando procedimento de Benjamini-Hochberg para controle de FDR em 5%.
+
+# Abundância relativa
+
+Abaixo pode-se ver o perfil geral de abundância relativa (em porcentagem) para os gêneros presentes em ao menos 10% das 266 amostras analisadas. Linhas foram ordenadas de acordo com abundância média ao longo de todas as amostras (mais abundante no topo). O termo "alteração" value "sim" caso o status da endoscopia seja diferente de "normal".
+
+> As imagens (arquivos .png) foram geradas com 300 dpi, embora nesse relatório elas possam parecer menos nítidas dependendo do navegador.
+
+```{r}
+knitr::include_graphics("output/bioinfo864/relative-abundances/genus.png")
+```
+
+E o mesmo grágico para filo.
+
+```{r}
+knitr::include_graphics("output/bioinfo864/relative-abundances/phylum.png")
+```
+
+
+Gráficos semelhantes para outros níveis taxonômicos estão disponíveis na pasta anexada junto a esse relatório.
+
+
+# Alfa-diversidade
+
+Análise de alfa-divesidade considerou três métricas: índice de Shannon, Simpson Invertido, e riqueza. A figura abaixo mostra o resultado do índice de Shannon como exemplo. O teste estatístico correspondente está indicado na figura.
+
+
+
+```{r}
+knitr::include_graphics(
+  path = 'output/bioinfo864/alpha-diversity/alpha-diversity-shannon-endoscopy.png'
+)
+```
+
+Outras métricas seguiram o mesmo padrão (figuras correspondentes estão na pasta anexada junto a esse relatório). Também não foi encotrada associação em termos de resultado binário da endoscopia.
+
+
+```{r}
+knitr::include_graphics(
+  path = 'output/bioinfo864/alpha-diversity/alpha-diversity-shannon-endoscopy-binary.png'
+)
+```
+
+## Efeito da coleta 
+
+Os dois estudos realizados foram indicados como "coletas" distintas em todas as análises. Abaixo, pode-se ver o efeito da coleta (ou _batch effect_) no índice de Shannon.
+
+```{r}
+knitr::include_graphics(
+  path = 'output/bioinfo864/alpha-diversity/alpha-diversity-shannon-coleta.png'
+)
+```
+
+# Beta-diversidade
+
+A análise de beta-diversidade foi realizada usando Análise de Coordenadas Principais ( _Principal Coordinate Analysis_, PCoA) com dissimilaridade de Bray-Curtis. Foi observado um padrão similar à alfa-diversidade -- i.e., sem associação com endoscopia (codificada de forma binária ou não) e efeito visível da coleta.
+
+```{r}
+knitr::include_graphics(
+  path = 'output/bioinfo864/beta-diversity/beta-diversity-endoscopy.png'
+)
+```
+
+```{r}
+knitr::include_graphics(
+  path = 'output/bioinfo864/beta-diversity/beta-diversity-coleta.png'
+)
+```
+
+
+# Abundância diferencial
+
+Dado o efeito forte da coleta sobre o perfil microbiano global desse conjunto de dados, todas as análises de abundância diferencial foram ajustadas para coleta -- ajuste para _batch effect_ . A análise incluiu abundâncias de bactérias identificadas para cada variante de sequência de amplicon (amplicon sequence variant, ASV), referenciadas nos arquivos como "lowest" (i.e., o menor nível taxonômico identificado para aquela sequência específica). Ainda, também foram testadas associações nos níveis de espécie, gênero, família e filo. Ajuste para múltiplas comparações foi realizado considerando todos os testes feitos, a fim de controlar a taxa de descobertas falsas (false discovery rate, FDR) em 5%. Três métodos distintos de abundância diferencial foram utilizados; modelos e testes correspondentes a cada software estão decritos abaixo. Testes estatísticos utilizados visam detectar efeito global do ajuste para o status da endoscopia.
+
+* __DESeq2__: modelo linear generalizado com verossimilhança binomial negativa, teste de razão de verossimilhanças.
+
+* __limma+voom__ : modelo linear com estimador ponderado, teste F.
+
+* __corncob__ : modelo linear generalizado com verossimilhança beta-binomial, teste de razão de verossimilhanças.
+
+Nenhum dos três métodos acusou quaisquer associações do status da endoscopia sobre abundância bacteriana nos 5 níveis taxonômicos testados. Análises exploratórias extensas foram realizadas a fim de buscar possíveis associações perdidas pelos modelos acima, incluindo ajuste para outros confundidores (e.g., tabagismo e uso de antibióticos) e aceite de FDR de até 10%. Essas análises não retornaram potenciais associações não detectadas previamente.
+
+Apenas como ilustração, a figura abaixo mostra os efeitos estimados ( _log2 fold-change_, log2FC) para cada status da endoscopia em comparação com pacientes com endoscopia inalterada -- nível taxonômico "lowest", i.e., ASV. Informalmente, pode-se considerar que valores absolutos de log2FC abaixo de 2 dificilmente têm significado biológico importante, independente de significância estatística. 
+
+```{r}
+knitr::include_graphics("output/bioinfo864/differential-abundance/diff-abund.png")
+```
+
+Note que todos os valores estão na faixa entre -2 e 2, i.e., mesmo que se alcançasse significância estatística, dificilmente a associação seria relevante -- claro, isso é apenas uma "rule of thumb", mas serve para termos noção dos tamanhos de efeito identificados.
+
+# Conclusão
+
+Usandos dados de dois estudos transversais prospectivos, não foram identificadas associações significativas entre microbioma oral e resultado da endoscopia.
+
+# Apêndice
+
+## Amostras excluídas
+
+Abaixo estão listadas as amostras excluídas da análise por não terem sido recebidas pelo laboratório, por terem sido rejeitadas pelo laboratório, ou por terem zero sequências identificadas:
+
+```{r}
+knitr::kable(
+  tibble::tribble(
+    ~Amostra, ~Motivo,
+    '201028230781', "rejeitada",
+    '210609230410', "rejeitada ",
+    '210713269440', "rejeitada",
+    '201028230794', "rejeitada", 
+    '210609230481', "não recebida",
+    '210609230428',  "rejeitada",
+    '210609230454', "rejeitada", 
+    '210609230478', "não recebida",
+    '210713269456', 'zerada',                                                  
+    '171107015201', 'zerada',
+    '171107015277', 'zerada',
+    '171107015246', 'zerada',
+    '171107015272', 'zerada',
+    '210713269494', 'zerada',
+    '171107015241', 'zerada',
+    '171107015210', 'zerada',
+    '210609230400', 'zerada',
+    '210830244840', 'zerada'
+  )
+)
+```
+
