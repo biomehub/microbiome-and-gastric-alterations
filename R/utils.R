@@ -95,10 +95,11 @@ taxa_prevalence <- function(.phyloseq) {
 }
 
 f <- \(.string, is_path = TRUE) {
+  .string <- stringr::str_glue(.string)
   if (isTRUE(is_path)) {
     dir.create(dirname(.string), recursive = TRUE, showWarnings = FALSE)
   }
-  stringr::str_glue(.string)
+  .string
 }
 
 get_taxon_couns <- function(.phyloseq, taxon, .rank = NULL) {

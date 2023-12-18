@@ -28,13 +28,14 @@ dir.create(outdir, recursive = TRUE, showWarnings = FALSE)
   select(-`...1`) %>% 
   column_to_rownames("otu") %>% 
   as.matrix()
-.meta <- read_tsv(here("data/metadata.tsv"),
+
+.meta <- read_tsv("data/metadata.tsv",
                   show_col_types = FALSE) %>% 
   mutate(
     endoscopia = as.character(endoscopia),
     y = factor(
-      ifelse(endoscopia == "normal", "normal", "alterada"),
-      levels = c("normal", "alterada")
+      ifelse(endoscopia == "normal", "no", "yes"),
+      levels = c("no", "yes")
     ),
     endoscopia = case_when(
       endoscopia == "normal" ~ "normal",
@@ -52,11 +53,29 @@ dir.create(outdir, recursive = TRUE, showWarnings = FALSE)
         )
       ),
     coleta = factor(
-      as.character(coleta),
-      levels = c("coleta-1", "coleta-2")
+      ifelse(coleta == "coleta-1", "Center 1", "Center 2"),
+      levels = c("Center 1", "Center 2")
+    ),
+    sintomas = factor(
+      ifelse(sintomas == "no", "no", "yes"),
+      levels = c("no", "yes")
+    ),
+    ibp = factor(
+      as.character(ibp),
+      levels = c("no", "yes")
+    ),
+    tabagismo = factor(
+      as.character(tabagismo),
+      levels = c("no", "yes")
+    ),
+    etilismo = factor(
+      as.character(etilismo),
+      levels = c("no", "yes")
     )
-  ) %>% 
+  ) %>%
+  dplyr::select(-atb) %>% # too few positives
   column_to_rownames('amostra')
+.meta$complete_case <- apply(.meta, 1, \(j) !any(is.na(j)))
 
 coletas <- .meta$coleta %>% 
   as.character() %>% 
@@ -113,7 +132,7 @@ alpha_results <- map(coletas, \(.coleta) {
     
     by = "sample_id"
   ) %>% 
-    pivot_longer(cols = all_of(alpha_metrics))
+    pivot_longer(cols = all_of(unname(alpha_metrics)))
   
   walk(alpha_metrics, \(.metric) {
     .df_alpha <- .df %>% 
@@ -135,7 +154,7 @@ alpha_results <- map(coletas, \(.coleta) {
       geom_boxplot(alpha = 0, lwd = 1) +
       scale_fill_manual(values = .cols$endoscopia) +
       labs(
-        x = "Endoscopia", y = .metric,
+        x = "Endoscopy", y = .metric,
         subtitle = paste0(
           "Kruskal-Wallis Rank Sum Test p=", 
           round(pvals$endoscopia$padj, 3)
@@ -150,7 +169,7 @@ alpha_results <- map(coletas, \(.coleta) {
       geom_boxplot(alpha = 0, lwd = 1) +
       scale_fill_manual(values = .cols$y) +
       labs(
-        x = "Endoscopia", y = .metric,
+        x = "Endoscopy", y = .metric,
         subtitle = paste0(
           "Wilcoxon Rank Sum Test p=", 
           round(pvals$y$padj, 3)
@@ -345,7 +364,7 @@ da_res <- map(coletas, \(.coleta) {
         "endoscopiaEE"
       ) %>% set_names(.)
       
-      if (.coleta == "coleta-2") {
+      if (.coleta %in% c("coleta-2", "Center 2")) {
         .contrasts[["endoscopiaDPG_EE"]] <- "endoscopiaDPG_EE"
       }
       
@@ -486,8 +505,3 @@ phylo_list %>%
     )
   )
 
-
-# phylogenetic stuff (POMS)
-
-devtools::install_github("gavinmdouglas/POMS", ref = "main")
-library(POMS)

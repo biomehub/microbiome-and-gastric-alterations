@@ -7,13 +7,15 @@ library(ggbeeswarm)
 library(DESeq2)
 library(corncob)
 library(limma)
-library(edgeR)  # BiocManager::install("edgeR")
+library(MicrobiomeStat) # install.packages('MicrobiomeStat')
+library(mice)  # install.packages('mice')
+
 
 
 # Basic setup -----------------------------------------------------
 source("R/utils.R")
 theme_set(theme_bw(base_size = 13))
-outdir <- "output/bioinfo864"
+outdir <- "output/analysis"
 dir.create(outdir, recursive = TRUE, showWarnings = FALSE)
 
 
@@ -33,8 +35,8 @@ dir.create(outdir, recursive = TRUE, showWarnings = FALSE)
   mutate(
     endoscopia = as.character(endoscopia),
     y = factor(
-      ifelse(endoscopia == "normal", "normal", "alterada"),
-      levels = c("normal", "alterada")
+      ifelse(endoscopia == "normal", "no", "yes"),
+      levels = c("no", "yes")
     ),
     endoscopia = case_when(
       endoscopia == "normal" ~ "normal",
@@ -52,11 +54,55 @@ dir.create(outdir, recursive = TRUE, showWarnings = FALSE)
         )
       ),
     coleta = factor(
-      as.character(coleta),
-      levels = c("coleta-1", "coleta-2")
+      ifelse(coleta == "coleta-1", "Center 1", "Center 2"),
+      levels = c("Center 1", "Center 2")
+    ),
+    sintomas = factor(
+      ifelse(sintomas == "no", "no", "yes"),
+      levels = c("no", "yes")
+    ),
+    ibp = factor(
+      as.character(ibp),
+      levels = c("no", "yes")
+    ),
+    tabagismo = factor(
+      as.character(tabagismo),
+      levels = c("no", "yes")
+    ),
+    etilismo = factor(
+      as.character(etilismo),
+      levels = c("no", "yes")
     )
-  ) %>% 
+  ) %>%
+  dplyr::select(-atb) %>% # too few positives
   column_to_rownames('amostra')
+.meta$complete_case <- apply(.meta, 1, \(j) !any(is.na(j)))
+
+# multiple imputation of metadata values
+
+pick_mode <- function(z) {
+  as.character(z[which.max(table(na.omit(z)))])
+}
+imp <- .meta %>% 
+  dplyr::select(-endoscopia, -y, -complete_case) %>% 
+  mice::mice(maxit = 10, m = 10, seed = 12345, printFlag = FALSE) %>% 
+  mice::complete('long', inc = TRUE) %>% 
+  filter(.imp > 0) %>% 
+  group_by(.id) %>% 
+  summarise(
+    ibp = pick_mode(ibp),
+    tabagismo = pick_mode(tabagismo),
+    etilismo = pick_mode(etilismo),
+    coleta = pick_mode(coleta),
+    sintomas = pick_mode(sintomas)
+  )
+
+.meta$ibp <- factor(imp$ibp, levels = c("no", "yes"))
+.meta$tabagismo <- factor(imp$tabagismo, levels = c("no", "yes"))
+.meta$etilismo <- factor(imp$etilismo, levels = c("no", "yes"))
+.meta$sintomas <- factor(imp$sintomas, levels = c("no", "yes"))
+
+any(is.na(.meta))
 
 phylo <- phyloseq(
   otu_table(.otu, taxa_are_rows = FALSE),
@@ -67,7 +113,7 @@ phylo <- phyloseq(
 zeroed_samples <- sample_names(phylo)[
   sample_sums(phylo) == 0
 ]
-write_lines(zeroed_samples, "output/zeroed-samples.tsv")
+write_lines(zeroed_samples, "output/analysis/zeroed-samples.tsv")
 phylo <- prune_samples(
   sample_sums(phylo) > 0, phylo
 )
@@ -81,7 +127,7 @@ phylo.prop <- transform_sample_counts(
 )
 
 included_samples <- sample_names(phylo)
-write_lines(included_samples, "output/included-samples.tsv")
+write_lines(included_samples, "output/analysis/included-samples.tsv")
 
 ## colors ----
 
@@ -119,6 +165,7 @@ for (.metric in c("Richness", "Shannon", "InvSimpson")) {
   
   pvals <- tribble(
     ~name, ~pval,
+    # same results with lm(log(value) ~ coleta + y (or endoscopia) + ibp + ..., data = .df_value)
     "coleta", wilcox.test(value ~ coleta, data = .df_alpha)$p.value,
     "y", wilcox.test(value ~ y, data = .df_alpha)$p.value,
     "endoscopia", kruskal.test(value ~ endoscopia, data = .df_alpha)$p.value
@@ -134,7 +181,7 @@ for (.metric in c("Richness", "Shannon", "InvSimpson")) {
     geom_boxplot(alpha = 0, lwd = 1) +
     scale_fill_manual(values = .cols$endoscopia) +
     labs(
-      x = "Endoscopia", y = .metric,
+      x = "Endoscopy", y = .metric,
       subtitle = paste0(
         "Kruskal-Wallis Rank Sum Test p=", 
         round(pvals$endoscopia$padj, 3)
@@ -149,7 +196,7 @@ for (.metric in c("Richness", "Shannon", "InvSimpson")) {
     geom_boxplot(alpha = 0, lwd = 1) +
     scale_fill_manual(values = .cols$y) +
     labs(
-      x = "Endoscopia", y = .metric,
+      x = "Any endoscopy alteration", y = .metric,
       subtitle = paste0(
         "Wilcoxon Rank Sum Test p=", 
         round(pvals$y$padj, 3)
@@ -164,7 +211,7 @@ for (.metric in c("Richness", "Shannon", "InvSimpson")) {
     geom_boxplot(alpha = 0, lwd = 1) +
     scale_fill_manual(values = .cols$coleta) +
     labs(
-      x = "Coleta", y = .metric,
+      x = NULL, y = .metric,
       subtitle = paste0(
         "Wilcoxon Rank Sum Test p=", 
         round(pvals$coleta$padj, 3)
@@ -190,7 +237,6 @@ for (.metric in c("Richness", "Shannon", "InvSimpson")) {
     width = 6, height = 4.5
   )
 }
-
 
 
 ## beta-diversity ----
@@ -256,7 +302,7 @@ p2 <- pcoa2$data %>%
   )
 
 
-.p <- (p1 | p2) +
+.p1 <- (p1 | p2) +
   plot_layout(guides = "collect") +
   plot_annotation(
     paste0(
@@ -269,7 +315,7 @@ p2 <- pcoa2$data %>%
 
 ggsave(
   f("{outdir}/beta-diversity/beta-diversity-endoscopy.png"),
-  .p, 
+  .p1, 
   width = 12, height = 4.5,bg = 'white'
 )
 
@@ -285,7 +331,7 @@ p3 <- pcoa1$data %>%
   labs(
     x = pcoa1$labels$x,
     y = pcoa1$labels$y,
-    fill = NULL
+    fill = "Any endoscopy\nalteration"
   )
 p4 <- pcoa2$data %>% 
   ggplot(aes(Axis.1, Axis.3)) +
@@ -295,10 +341,10 @@ p4 <- pcoa2$data %>%
   labs(
     x = p2$labels$x,
     y = p2$labels$y,
-    fill = NULL
+    fill = "Any endoscopy\nalteration"
   )
 
-.p <- (p3 | p4) +
+.p2 <- (p3 | p4) +
   plot_layout(guides = "collect") +
   plot_annotation(
     paste0(
@@ -311,7 +357,7 @@ p4 <- pcoa2$data %>%
 
 ggsave(
   f("{outdir}/beta-diversity/beta-diversity-endoscopy-binary.png"),
-  .p, 
+  .p2, 
   width = 12, height = 4.5,bg = 'white'
 )
 
@@ -339,7 +385,7 @@ p6 <- pcoa2$data %>%
   )
 
 
-.p <- (p5 | p6) +
+.p3 <- (p5 | p6) +
   plot_layout(guides = "collect") +
   plot_annotation(
     paste0(
@@ -352,8 +398,16 @@ p6 <- pcoa2$data %>%
 
 ggsave(
   f("{outdir}/beta-diversity/beta-diversity-coleta.png"),
-  .p, 
-  width = 12, height = 4.5,bg = 'white'
+  .p3, 
+  width = 12, height = 4.5, bg = 'white'
+)
+
+### all together ----
+
+ggsave(
+  f("{outdir}/beta-diversity/beta-diversity-all.png"),
+  ggarrange(.p2, .p1, .p3, nrow = 3, ncol = 1),
+  width = 12, height = 4.5*2.5, bg = 'white'
 )
 
 
@@ -362,7 +416,7 @@ ggsave(
 ## DESeq2 ----
 
 rank_list <- c(
-  "lowest",
+  "lowest",    # ASV level
   "species",
   "genus",
   "family",
@@ -370,19 +424,21 @@ rank_list <- c(
 ) %>% 
   set_names(.)
 
+phylo_list <- map(rank_list, ~ tax_glom2(phylo, .rank = .x))
+
 min_prevalence <- 0.05
 
 da_deseq2 <- map_df(rank_list, \(.rank) {
   print(str_glue("\n\nRank: {.rank}\n"))
-  phylo.rank <- tax_glom2(phylo, .rank = .rank)
+  phylo.rank <- phylo_list[[.rank]]
   phylo.rank <- prune_taxa(
     # taxa must be present in at least `min_prevalence` of samples
     taxa_prevalence(phylo.rank) >= min_prevalence,
     phylo.rank
   )
   phylo.rank@sam_data$coleta <- factor(
-    str_replace(phylo.rank@sam_data$coleta, "-", "_"),
-    levels = c("coleta_1", "coleta_2")
+    str_replace(phylo.rank@sam_data$coleta, " ", "_"),
+    levels = c("Center_1", "Center_2")
   )
   phylo.rank@sam_data$endoscopia <- factor(
     str_replace(phylo.rank@sam_data$endoscopia, "\\+", "_"),
@@ -421,7 +477,6 @@ da_deseq2 <- map_df(rank_list, \(.rank) {
               contrast = c("endoscopia", "DPG_EE", "normal"), tidy = T) %>% 
         select(bac := row, 
                DPG_EE_vs_normal := log2FoldChange, 
-               DPG_EE_vs_normal_SE := lfcSE, 
                DPG_EE_vs_normal_pvalue := pvalue, 
                DPG_EE_vs_normal_padj := padj),
       by = "bac"
@@ -443,12 +498,6 @@ da_deseq2 <- map_df(rank_list, \(.rank) {
 da_deseq2 %>% 
   filter(lrt_padj < 0.1) %>% 
   nrow()
-da_deseq2 %>% 
-  filter(
-    DPG_EE_vs_normal_padj < .1 |
-      DPG_vs_normal_padj < .1 |
-      EE_vs_normal_padj < .1
-  )
 
 # just so we have some fig from this
 
@@ -492,7 +541,7 @@ da_deseq2 %>%
   xlim(-3.5, 3.5)
 
 ggsave(
-  f("output/bioinfo864/differential-abundance/diff-abund.png"),
+  f("output/analysis/differential-abundance/diff-abund.png"),
   .p, width = 6, height = 5
 )
 ## corcob ----
@@ -501,20 +550,54 @@ ggsave(
 da_cc <- map_df(rank_list, \(.rank) {
   
   print(str_glue("\n\nRank: {.rank}\n"))
-  phylo.rank <- tax_glom2(phylo, .rank = .rank)
+  phylo.rank <- phylo_list[[.rank]]
   phylo.rank <- prune_taxa(
     # taxa must be present in at least `min_prevalence` of samples
     taxa_prevalence(phylo.rank) >= min_prevalence,
     phylo.rank
   )
   phylo.rank@sam_data$coleta <- factor(
-    str_replace(phylo.rank@sam_data$coleta, "-", "_"),
-    levels = c("coleta_1", "coleta_2")
+    str_replace(phylo.rank@sam_data$coleta, " ", "_"),
+    levels = c("Center_1", "Center_2")
   )
   phylo.rank@sam_data$endoscopia <- factor(
     str_replace(phylo.rank@sam_data$endoscopia, "\\+", "_"),
     levels = c("normal", "DPG", "EE", "DPG_EE")
   )
+  
+  d_lrt <- corncob::differentialTest(
+    formula = ~ coleta + endoscopia,
+    formula_null = ~ coleta,
+    phi.formula = ~ coleta,
+    phi.formula_null = ~ coleta,
+    data = phylo.rank,
+    test = "LRT", 
+    fdr_cutoff = 1
+  )
+  
+  .level <- ifelse(.rank == "lowest", "lowest_taxonomy", .rank)
+  estimates <- corncob:::plot.differentialTest(d_lrt, level = .level, data_only = T) %>%
+    mutate(
+      contrast = paste0(
+        str_extract(variable, "DPG_EE|DPG|EE"), 
+        "_vs_normal"
+      )
+    ) %>% 
+    select(bac := taxa, x, contrast) %>% 
+    pivot_wider(
+      names_from = contrast,
+      values_from = x
+    )
+  
+  res_lrt <- tibble(
+    bac = names(d_lrt$p_fdr),
+    lrt_pvalue = d_lrt$p,
+    lrt_padj = d_lrt$p_fdr
+  ) %>% 
+    inner_join(
+      estimates,
+      by = 'bac'
+    )
   
   .contrasts <- list(
     "endoscopiaDPG",
@@ -531,43 +614,46 @@ da_cc <- map_df(rank_list, \(.rank) {
     tibble(
       bac = taxa_names(d$data),
       term = .contrasts[[.x]],
+      pvalue = d$p[, .x],
       padj = d$p_fdr[, .x]
     )
-  })
+  }) %>%
+    pivot_wider(
+      names_from = term,
+      values_from = c(pvalue, padj),
+      names_repair = function(x) ifelse(
+        x == "bac", x,
+        paste0(
+          str_extract(x, "DPG_EE|DPG|EE"),
+          "_vs_normal_",
+          str_extract(x, "pvalue|padj")
+        )
+      )
+    )
+  
+  res <- inner_join(res_lrt, res, by = 'bac')
 
   return(res)
 }, .id = "tax_rank") %>% 
   mutate(tool = "corncob")
 
-### no differential abundant taxa:
-### (decreasing order of "correctness")
 
-sigs_corncob <- da_cc %>% 
-  filter(padj < 0.1)
-sigs_corncob
-
-### probably just noise
-phylo.prop %>% 
-  tax_glom2("genus") %>% 
-  get_taxon_couns('Mycoplasma') %>% 
-  ggplot(aes(endoscopia, value)) +
-  geom_boxplot() +
-  geom_quasirandom() +
-  stat_compare_means()
+da_cc %>% 
+  filter(lrt_padj < 0.1)
 
 ## limma + voom ----
 
 da_lv <- map_df(rank_list, \(.rank) {
   print(str_glue("\n\nRank: {.rank}\n"))
-  phylo.rank <- tax_glom2(phylo, .rank = .rank)
+  phylo.rank <- phylo_list[[.rank]]
   phylo.rank <- prune_taxa(
     # taxa must be present in at least `min_prevalence` of samples
     taxa_prevalence(phylo.rank) >= min_prevalence,
     phylo.rank
   )
   phylo.rank@sam_data$coleta <- factor(
-    str_replace(phylo.rank@sam_data$coleta, "-", "_"),
-    levels = c("coleta_1", "coleta_2")
+    str_replace(phylo.rank@sam_data$coleta, " ", "_"),
+    levels = c("Center_1", "Center_2")
   )
   phylo.rank@sam_data$endoscopia <- factor(
     str_replace(phylo.rank@sam_data$endoscopia, "\\+", "_"),
@@ -608,34 +694,54 @@ da_lv <- map_df(rank_list, \(.rank) {
             bac, 
             term,
             estimate := logFC,
-            .lower := CI.L,
-            .upper := CI.R,
             pvalue := P.Value,
             padj := adj.P.Val
           )
       }
+    ) %>% 
+    pivot_wider(
+      names_from = term,
+      values_from = c(estimate, pvalue, padj),
+      names_repair = function(x) ifelse(
+        x == "bac",
+        x,
+        paste0(
+          str_extract(x, "DPG_EE|DPG|EE"),
+          "_vs_normal",
+          ifelse(
+            str_detect(x, "estimate"),
+            "",
+            paste0("_", str_extract(x, "pvalue|padj"))
+          )
+        )
+      )
     )
+  res_f <- topTable(fit, coef = c(3, 4, 5), number = Inf) %>% 
+    as_tibble(rownames = "bac") %>% 
+    select(bac, lrt_pvalue := P.Value, lrt_padj := adj.P.Val)
+  
+  res <- inner_join(res, res_f, by = "bac")
   
   return(res)
 }, .id = "tax_rank") %>% 
   mutate(tool = "limma+voom")
 
-sigs_lv <- da_lv %>% 
-  filter(padj < 0.1)
+da_lv %>% 
+  filter(lrt_padj < 0.1)
 
 ## diff presence ----
 
 dp_res <- map_df(rank_list, \(.rank) {
   print(str_glue("\n\nRank: {.rank}\n"))
-  phylo.rank <- tax_glom2(phylo, .rank = .rank)
+  phylo.rank <- phylo_list[[.rank]]
   phylo.rank <- prune_taxa(
     # taxa must be present in at least `min_prevalence` of samples
     taxa_prevalence(phylo.rank) >= min_prevalence,
     phylo.rank
   )
   phylo.rank@sam_data$coleta <- factor(
-    str_replace(phylo.rank@sam_data$coleta, "-", "_"),
-    levels = c("coleta_1", "coleta_2")
+    str_replace(phylo.rank@sam_data$coleta, " ", "_"),
+    levels = c("Center_1", "Center_2")
   )
   phylo.rank@sam_data$endoscopia <- factor(
     str_replace(phylo.rank@sam_data$endoscopia, "\\+", "_"),
@@ -646,43 +752,265 @@ dp_res <- map_df(rank_list, \(.rank) {
   rank_res <- map_df(taxa_list, \(.taxname) {
     .df <- get_taxon_couns(.phyloseq = phylo.rank, taxon = .taxname) %>% 
       mutate(value = as.numeric(value > 0))
-    fit <- logistf::logistf(
-      value ~ coleta + endoscopia, data = .df
+    fitnull <- logistf::logistf(
+      value ~ coleta, data = .df,
+      control = logistf::logistf.control(maxit = 100, maxstep = 10)
     )
-    summary_logistf(fit, .print = FALSE) %>% 
+    fit <- logistf::logistf(
+      value ~ coleta + endoscopia, data = .df,
+      control = logistf::logistf.control(maxit = 100, maxstep = 10)
+    )
+    
+    summary_logistf(fit) %>% 
       as_tibble(rownames = "term") %>% 
       filter(str_detect(term, "endoscopia")) %>% 
       dplyr::select(
         term, estimate := coef,
-        .lower := `lower 0.95`,
-        .upper := `upper 0.95`,
         pval := p
+      ) %>% 
+      pivot_wider(
+        names_from = term,
+        values_from = c(estimate, pval),
+        names_repair = function(x) paste0(
+          str_extract(x, "DPG_EE|DPG|EE"),
+          "_vs_normal",
+          ifelse(
+            str_detect(x, "estimate"),
+            "",
+            paste0("_", str_extract(x, "pval"))
+          )
+        )
+      ) %>% 
+      mutate(
+        lrt_pval = anova(fit, fitnull, method = "PLR")$pval[[1]]
       )
-  }, .id = "bac") %>% 
+  }, .id = "bac") %>%
+    rename_with(~str_replace(., 'pval', 'pvalue')) %>% 
     mutate(
-      padj = p.adjust(pval, method = "BH")
+      lrt_padj = p.adjust(lrt_pvalue, method = "BH"),
+      DPG_vs_normal_padj = p.adjust(DPG_vs_normal_pvalue, method = "BH"),
+      DPG_EE_vs_normal_padj = p.adjust(DPG_EE_vs_normal_pvalue, method = "BH"),
+      EE_vs_normal_padj = p.adjust(EE_vs_normal_pvalue, method = "BH")
     )
-}, .id = "tax_rank")
+}, .id = "tax_rank") %>% 
+  mutate(tool = "Firth")
 
-sigs_dp <- dp_res %>% 
-  filter(padj < .1)
+dp_res %>% 
+  filter(lrt_padj < .1)
 
-sigs_freq <- list(sigs_corncob, sigs_dp, sigs_lv) %>% 
-  map(
-    ~ {
-      .x %>% 
-        mutate(x = paste0(bac, "-", term, "-", tax_rank)) %>% 
-        pull(x)
-    }
+## LinDA / MicrobiomeStat ----
+
+da_linda <- map_df(rank_list, \(.rank) {
+  print(str_glue("\n\nRank: {.rank}\n"))
+  phylo.rank <- phylo_list[[.rank]]
+  phylo.rank <- prune_taxa(
+    # taxa must be present in at least `min_prevalence` of samples
+    taxa_prevalence(phylo.rank) >= min_prevalence,
+    phylo.rank
+  )
+  phylo.rank@sam_data$coleta <- factor(
+    str_replace(phylo.rank@sam_data$coleta, " ", "_"),
+    levels = c("Center_1", "Center_2")
+  )
+  phylo.rank@sam_data$endoscopia <- factor(
+    str_replace(phylo.rank@sam_data$endoscopia, "\\+", "_"),
+    levels = c("normal", "DPG", "EE", "DPG_EE")
+  )
+
+  .meta_data <- data.frame(phylo.rank@sam_data)
+  .otu_data <- t(phylo.rank@otu_table@.Data)[, rownames(.meta_data)]
+
+  # no overall F test - annoying
+  res_overall <- MicrobiomeStat::linda(
+    feature.dat = .otu_data, 
+    meta.dat = .meta_data, 
+    formula = "~ coleta + y",
+    feature.dat.type = 'count',
+    prev.filter = min_prevalence,
+    zero.handling = "imputation",
+    n.cores = 4
+  )$output$yyes %>%
+    rownames_to_column("bac") %>% 
+    select(bac, lrt_pvalue := pvalue, lrt_padj := padj)
+  
+  res <- MicrobiomeStat::linda(
+    feature.dat = .otu_data, 
+    meta.dat = .meta_data, 
+    formula = "~ coleta + endoscopia",
+    feature.dat.type = 'count',
+    prev.filter = min_prevalence,
+    zero.handling = "imputation",
+    n.cores = 4
+  )$output %>% 
+    map_df(~ rownames_to_column(.x, "bac"), .id = "term") %>%
+    filter(str_detect(term, "endoscopia")) %>% 
+    select(term, bac, estimate := log2FoldChange, pvalue, padj) %>% 
+    pivot_wider(
+      names_from = term,
+      values_from = c(estimate, pvalue, padj),
+      names_repair = function(x) ifelse(
+        x == "bac",
+        x,
+        paste0(
+          str_extract(x, "DPG_EE|DPG|EE"),
+          "_vs_normal",
+          ifelse(
+            str_detect(x, "estimate"),
+            "",
+            paste0("_", str_extract(x, "pvalue|padj"))
+          )
+        )
+      )
+    )
+
+  res <- inner_join(res, res_overall, by = "bac")
+  
+  return(res)
+}, .id = "tax_rank") %>% 
+  mutate(tool = "linda")
+
+da_linda %>% 
+  filter(lrt_padj < 0.1)
+
+# combine DA results ----
+
+all_res <- bind_rows(da_deseq2, da_cc, da_lv, dp_res, da_linda) %>% 
+  mutate(
+    bac = str_replace_all(bac, "_", " ")
   ) %>% 
-  unlist() %>% 
-  table() %>% 
-  sort()
-actually_sigs <- sigs_freq[sigs_freq > 1]
-# they are all the same ASVs
-as.data.frame(tax_table(phylo.prop)) %>% 
-  filter(genus == "Mycoplasma")
-df <- get_taxon_couns(phylo.prop, "Mycoplasma", "genus")
+  select(-contains("_SE"))
+
+all_res %>% 
+  filter(lrt_padj < .1) %>% 
+  group_by(tax_rank, bac) %>% 
+  summarise(
+    n = n(),
+    tools = paste0(unique(tool), collapse = "; ")
+  ) %>%
+  arrange(desc(n))
+all_res %>%
+  group_by(tool) %>% 
+  mutate(lrt_padj2 = p.adjust(lrt_pvalue, method = 'BH')) %>% 
+  select(bac, tax_rank, tool, contains("lrt")) %>% 
+  filter(lrt_padj2<.1)
+
+df <- all_res %>% 
+  select(-contains("_SE")) %>%
+  mutate(tool = ifelse(tool == "Firth", "logistf", tool)) %>% 
+  filter(tax_rank != "lowest")
+
+## volcano ----
+p1 <- df %>%
+  mutate(
+    sig = ifelse(
+      DPG_vs_normal_padj< 0.1 & lrt_padj < .1,
+      "Significant at FDR 10%",
+      "Not significant at FDR 10%"
+    )
+  ) %>% 
+  na.omit() %>% 
+  ggplot(aes(DPG_vs_normal, -log10(DPG_vs_normal_pvalue))) +
+  ggrepel::geom_text_repel(
+    aes(label = str_replace_all(bac, "_", " ")),
+    data = . %>% filter(!str_detect(sig, "Not"))
+  ) +
+  geom_point(aes(color = sig)) +
+  labs(
+    color = NULL,
+    x = NULL,
+    y = "-log10(p-value)",
+    title = "DPG vs normal"
+  ) +
+  facet_wrap(~tool, ncol = 5) +
+  coord_cartesian(xlim = c(-3, 3), ylim = c(0, 5)) +
+  guides(color = "none")
+p2 <- df %>%
+  mutate(
+    sig = ifelse(
+      EE_vs_normal_padj< 0.1 & lrt_padj < .1,
+      "Significant at FDR 10%",
+      "Not significant at FDR 10%"
+    )
+  ) %>% 
+  na.omit() %>% 
+  ggplot(aes(EE_vs_normal, -log10(EE_vs_normal_pvalue))) +
+  ggrepel::geom_text_repel(
+    aes(label = str_replace_all(bac, "_", " ")),
+    data = . %>% filter(!str_detect(sig, "Not")),
+    max.time = 10, max.iter = 3e4
+  ) +
+  geom_point(aes(color = sig)) +
+  labs(
+    color = NULL,
+    x = NULL,
+    y = "-log10(p-value)",
+    title = "EE vs normal"
+  ) +
+  facet_wrap(~tool, ncol = 5) +
+  coord_cartesian(xlim = c(-3, 3), ylim = c(0, 5))
+p3 <- df %>%
+  mutate(
+    sig = ifelse(
+      DPG_EE_vs_normal_padj< 0.1 & lrt_padj < .1,
+      "Significant at FDR 10%",
+      "Not significant at FDR 10%"
+    )
+  ) %>% 
+  na.omit() %>% 
+  ggplot(aes(DPG_EE_vs_normal, -log10(DPG_EE_vs_normal_pvalue))) +
+  ggrepel::geom_text_repel(
+    aes(label = str_replace_all(bac, "_", " ")),
+    data = . %>% filter(!str_detect(sig, "Not")),
+    max.time = 5, nudge_x = -1
+  ) +
+  geom_point(aes(color = sig)) +
+  labs(
+    color = NULL,
+    x = "log2FC",
+    y = "-log10(p-value)",
+    title = "DPG+EE vs normal"
+  ) +
+  facet_wrap(~tool, ncol = 5) +
+  coord_cartesian(xlim = c(-3, 3), ylim = c(0, 5))
+
+.p <- guide_area() + (p1/p2/p3) +
+  plot_layout(guides = "collect",
+              nrow = 2,
+              heights = c(1, 20)) & theme(legend.position = 'top') 
+ggsave(
+  f("{outdir}/differential-abundance/volcano-all.png"),
+  .p, width = 14, height = 10
+)
+
+# accont for tools
+all_res %>% 
+  group_by(tax_rank) %>% 
+  mutate(lrt_padj2 = p.adjust(lrt_pvalue, method = 'BH')) %>% 
+  select(bac, tax_rank, tool, contains("lrt")) %>% 
+  filter(lrt_padj2<.1)
+
+# account for tax ranks
+all_res %>%
+  group_by(tool) %>% 
+  mutate(lrt_padj2 = p.adjust(lrt_pvalue, method = 'BH')) %>% 
+  select(bac, tax_rank, tool, contains("lrt")) %>% 
+  filter(lrt_padj2<.1)
+
+# account for both
+all_res %>%
+  mutate(lrt_padj2 = p.adjust(lrt_pvalue, method = 'BH')) %>% 
+  select(bac, tax_rank, tool, contains("lrt")) %>% 
+  filter(lrt_padj2<.1)
+
+## potential-ish hit ----
+
+.bac <- "Tenericutes"
+.tax_rank <- "phylum"
+all_res %>% 
+  filter(str_detect(bac, .bac), tax_rank == .tax_rank) %>% 
+  view
+
+df <- get_taxon_couns(phylo.prop, .bac, .tax_rank)
 
 
 prev_data <- df %>% 
@@ -699,7 +1027,8 @@ prev_data <- df %>%
       scales::percent(lower, accuracy = 1),
       " \u2012 ",
       scales::percent(upper, accuracy = 1),
-      "]"
+      "]\n(",
+      x, "/", n, ")"
     ),
     value = 0.015
   ) %>% 
@@ -709,7 +1038,9 @@ df %>%
   ggplot(aes(endoscopia, value)) +
   geom_boxplot(outlier.shape = NA) +
   ggbeeswarm::geom_quasirandom(
-    color = "gray40"
+    color = "gray40", pch = 21, size = 3,
+    aes(fill = coleta),
+    width = .3
   ) +
   stat_summary(fun.data = mean_ci, col='red') +
   geom_text(
@@ -719,11 +1050,20 @@ df %>%
   scale_y_continuous(
     labels = scales::percent
   ) +
+  scale_fill_manual(
+    values = .cols$coleta
+  ) +
   labs(
     y = "Relative abundance",
-    x = NULL,
-    subtitle = "Mycoplasma (genus)"
+    x = NULL, fill = NULL,
+    subtitle = str_glue("{.bac} ({.tax_rank})")
   )
+
+ggsave(
+  f("{outdir}/differential-abundance/{.bac}-{.tax_rank}.png"),
+  width = 10, height = 4.75
+)
+
 
 # Overall Variation ----
 
@@ -733,14 +1073,24 @@ phylo_prop_list <- map(rank_list, ~{
 })
 
 for (.rank in rank_list) {
+  cat(.rank, sep = "\n")
   
   phylo.prop.rank <- phylo_prop_list[[.rank]]
   
-  bacs_ix <- colMeans(otu_table(phylo.prop.rank) > 0) > min_prevalence
-  counts_matrix <- phylo.prop.rank@otu_table@.Data[,bacs_ix]
-  counts_matrix <- counts_matrix[, order(colMeans(counts_matrix), decreasing = T)]
+  bacs_ix <- colMeans(otu_table(phylo.prop.rank) > 0) >= min_prevalence
+  others <- phylo.prop.rank@otu_table@.Data[, !bacs_ix]
+  others <- ifelse(
+    is.vector(others), others, rowSums(others)
+  )
+  counts_matrix <- cbind(
+    phylo.prop.rank@otu_table@.Data[,bacs_ix],
+    "Others (<5% prevalence)" = others
+  )
   
-  file_path <- f('output/bioinfo864/relative-abundances/{.rank}.png')
+  taxa_order <- order(colMeans(counts_matrix), decreasing = T)
+  counts_matrix <- counts_matrix[, taxa_order]
+  
+  file_path <- f('{outdir}/relative-abundances/{.rank}.png')
   png(
     file_path,
     res = 600, 
@@ -751,10 +1101,10 @@ for (.rank in rank_list) {
     100*t(counts_matrix),
     annotation_col = phylo.prop.rank@sam_data %>% 
       as_tibble(rownames = "sample_id") %>% 
-      mutate(alteração = ifelse(endoscopia == "normal", "não", "sim"),
-             coleta = str_replace(coleta, "-", " ")) %>% 
-      column_to_rownames("sample_id") %>% 
-      dplyr::select(alteração, endoscopia, coleta) ,
+      mutate(`Any alteration` = ifelse(endoscopia == "normal", "no", "yes"),
+             Center = str_replace(coleta, "-", " ")) %>%
+      select(sample_id, `Any alteration`, Endoscopy := endoscopia, Center) %>% 
+      column_to_rownames("sample_id"),
     show_colnames = F,
     cluster_rows = FALSE,
     scale = 'none',
@@ -763,4 +1113,22 @@ for (.rank in rank_list) {
     legend_labels = paste0(seq(0, 100, 25), "%")
   )
   dev.off()
+  
+  top_taxa <- as.vector(na.omit(colnames(counts_matrix)[1:20]))
+  .p <- cbind(
+    phylo.prop.rank@sam_data, counts_matrix[, top_taxa]
+  ) %>% 
+    as_tibble(rownames = "sample_id") %>% 
+    pivot_longer(cols = all_of(unname(top_taxa))) %>% 
+    ggplot(aes(fct_relevel(name, top_taxa), value, color = coleta)) +
+    geom_boxplot(position = position_dodge(width = 0.8)) +
+    scale_y_continuous(labels = scales::percent, limits = c(0, 1)) +
+    scale_color_manual(values = .cols$coleta) +
+    theme(axis.text.x = element_text(angle = 30, hjust = 1, size = 9),
+          legend.position = c(.8, .8)) +
+    labs(x = NULL, color = NULL, y = "Abundance (%)")
+  ggsave(
+    f("{outdir}/relative-abundances/top-taxa-{.rank}.png"),
+    .p, width = 12, height = 6
+  )
 }
