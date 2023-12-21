@@ -51,3 +51,4 @@ rsconnect/
 # Docker stuff
 .config/
 .local/
+*_old/

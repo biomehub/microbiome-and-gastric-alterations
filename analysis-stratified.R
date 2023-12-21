@@ -39,17 +39,17 @@ dir.create(outdir, recursive = TRUE, showWarnings = FALSE)
     ),
     endoscopia = case_when(
       endoscopia == "normal" ~ "normal",
-      endoscopia == "doença péptica gastroduodenal" ~ "DPG",
+      endoscopia == "doença péptica gastroduodenal" ~ "GPD",
       endoscopia == "esofagite erosiva" ~ "EE",
-      endoscopia == "esofagite erosiva, doença péptica gastroduodenal" ~ "DPG+EE",
+      endoscopia == "esofagite erosiva, doença péptica gastroduodenal" ~ "GPD+EE",
       TRUE ~ NA_character_
     ) %>% 
       factor(
         levels = c(
           "normal",
-          "DPG",
+          "GPD",
           "EE",
-          "DPG+EE"
+          "GPD+EE"
         )
       ),
     coleta = factor(
@@ -346,7 +346,7 @@ da_res <- map(coletas, \(.coleta) {
       )
       phylo.rank@sam_data$endoscopia <- fct_relevel(
         str_replace(phylo.rank@sam_data$endoscopia, "\\+", "_"),
-        "normal", "DPG", "EE", "DPG_EE"
+        "normal", "GPD", "EE", "GPD_EE"
       )
       
       # DESeq2 
@@ -360,12 +360,12 @@ da_res <- map(coletas, \(.coleta) {
       
       # Corncob
       .contrasts <- list(
-        "endoscopiaDPG",
+        "endoscopiaGPD",
         "endoscopiaEE"
       ) %>% set_names(.)
       
       if (.coleta %in% c("coleta-2", "Center 2")) {
-        .contrasts[["endoscopiaDPG_EE"]] <- "endoscopiaDPG_EE"
+        .contrasts[["endoscopiaGPD_EE"]] <- "endoscopiaGPD_EE"
       }
       
       d <- contrastsTest(formula = ~ coleta + endoscopia,
@@ -483,7 +483,7 @@ da_res %>%
 # the second sample. Moreover, the association
 # in the first sample was with the EE group, whereas
 # the association in the second sample was with the
-# DPG+EE group. All reads from this phylum came from the
+# GPD+EE group. All reads from this phylum came from the
 # Mycoplasma genus, though associations at lower levels likely
 # diseapeared after FDR adjustment. Given the inconsistent
 # results across 4 DA tools and between the two samples,
@@ -501,7 +501,7 @@ phylo_list %>%
   facet_wrap(~coleta, scales = 'free') +
   labs(
     subtitle = paste0(
-      "Tenericutes association\nEE vs normal (coleta 1, FDR 10%)\nDPG+EE vs normal (coleta 2, FDR 10%)"
+      "Tenericutes association\nEE vs normal (coleta 1, FDR 10%)\nGPD+EE vs normal (coleta 2, FDR 10%)"
     )
   )
 

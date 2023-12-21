@@ -40,17 +40,17 @@ dir.create(outdir, recursive = TRUE, showWarnings = FALSE)
     ),
     endoscopia = case_when(
       endoscopia == "normal" ~ "normal",
-      endoscopia == "doença péptica gastroduodenal" ~ "DPG",
+      endoscopia == "doença péptica gastroduodenal" ~ "GPD",
       endoscopia == "esofagite erosiva" ~ "EE",
-      endoscopia == "esofagite erosiva, doença péptica gastroduodenal" ~ "DPG+EE",
+      endoscopia == "esofagite erosiva, doença péptica gastroduodenal" ~ "GPD+EE",
       TRUE ~ NA_character_
     ) %>% 
       factor(
         levels = c(
           "normal",
-          "DPG",
+          "GPD",
           "EE",
-          "DPG+EE"
+          "GPD+EE"
         )
       ),
     coleta = factor(
@@ -442,7 +442,7 @@ da_deseq2 <- map_df(rank_list, \(.rank) {
   )
   phylo.rank@sam_data$endoscopia <- factor(
     str_replace(phylo.rank@sam_data$endoscopia, "\\+", "_"),
-    levels = c("normal", "DPG", "EE", "DPG_EE")
+    levels = c("normal", "GPD", "EE", "GPD_EE")
   )
   
   lrt_pvals <- phylo.rank %>%
@@ -457,12 +457,12 @@ da_deseq2 <- map_df(rank_list, \(.rank) {
     DESeq(sfType = 'poscounts', betaPrior = TRUE, quiet = TRUE)
   beta_estimates <- inner_join(
     results(poshoc_ds, 
-            contrast = c("endoscopia", "DPG", "normal"), tidy = T) %>% 
+            contrast = c("endoscopia", "GPD", "normal"), tidy = T) %>% 
       select(bac := row, 
-             DPG_vs_normal := log2FoldChange, 
-             DPG_vs_normal_SE := lfcSE, 
-             DPG_vs_normal_pvalue := pvalue, 
-             DPG_vs_normal_padj := padj),
+             GPD_vs_normal := log2FoldChange, 
+             GPD_vs_normal_SE := lfcSE, 
+             GPD_vs_normal_pvalue := pvalue, 
+             GPD_vs_normal_padj := padj),
     results(poshoc_ds, 
             contrast = c("endoscopia", "EE", "normal"), tidy = T) %>% 
       select(bac := row, 
@@ -474,11 +474,11 @@ da_deseq2 <- map_df(rank_list, \(.rank) {
   ) %>% 
     inner_join(
       results(poshoc_ds, 
-              contrast = c("endoscopia", "DPG_EE", "normal"), tidy = T) %>% 
+              contrast = c("endoscopia", "GPD_EE", "normal"), tidy = T) %>% 
         select(bac := row, 
-               DPG_EE_vs_normal := log2FoldChange, 
-               DPG_EE_vs_normal_pvalue := pvalue, 
-               DPG_EE_vs_normal_padj := padj),
+               GPD_EE_vs_normal := log2FoldChange, 
+               GPD_EE_vs_normal_pvalue := pvalue, 
+               GPD_EE_vs_normal_padj := padj),
       by = "bac"
     )
   
@@ -508,12 +508,12 @@ da_deseq2 %>%
   ) %>% 
   mutate(
     name = case_when(
-      str_detect(name, "DPG_EE_vs") ~ "DPG+EE",
-      str_detect(name, "DPG_vs") ~ "DPG",
+      str_detect(name, "GPD_EE_vs") ~ "GPD+EE",
+      str_detect(name, "GPD_vs") ~ "GPD",
       str_detect(name, "EE_vs") ~ "EE"
     ) %>% 
       factor(
-        levels = c("DPG", "EE", "DPG+EE")
+        levels = c("GPD", "EE", "GPD+EE")
       )
   ) %>% 
   ggplot(aes(x = value, y = name, fill = name)) +
@@ -562,7 +562,7 @@ da_cc <- map_df(rank_list, \(.rank) {
   )
   phylo.rank@sam_data$endoscopia <- factor(
     str_replace(phylo.rank@sam_data$endoscopia, "\\+", "_"),
-    levels = c("normal", "DPG", "EE", "DPG_EE")
+    levels = c("normal", "GPD", "EE", "GPD_EE")
   )
   
   d_lrt <- corncob::differentialTest(
@@ -579,7 +579,7 @@ da_cc <- map_df(rank_list, \(.rank) {
   estimates <- corncob:::plot.differentialTest(d_lrt, level = .level, data_only = T) %>%
     mutate(
       contrast = paste0(
-        str_extract(variable, "DPG_EE|DPG|EE"), 
+        str_extract(variable, "GPD_EE|GPD|EE"), 
         "_vs_normal"
       )
     ) %>% 
@@ -600,9 +600,9 @@ da_cc <- map_df(rank_list, \(.rank) {
     )
   
   .contrasts <- list(
-    "endoscopiaDPG",
+    "endoscopiaGPD",
     "endoscopiaEE",
-    "endoscopiaDPG_EE"
+    "endoscopiaGPD_EE"
   ) %>% set_names(.)
   d <- contrastsTest(formula = ~ coleta + endoscopia,
                      phi.formula = ~ coleta,
@@ -624,7 +624,7 @@ da_cc <- map_df(rank_list, \(.rank) {
       names_repair = function(x) ifelse(
         x == "bac", x,
         paste0(
-          str_extract(x, "DPG_EE|DPG|EE"),
+          str_extract(x, "GPD_EE|GPD|EE"),
           "_vs_normal_",
           str_extract(x, "pvalue|padj")
         )
@@ -657,7 +657,7 @@ da_lv <- map_df(rank_list, \(.rank) {
   )
   phylo.rank@sam_data$endoscopia <- factor(
     str_replace(phylo.rank@sam_data$endoscopia, "\\+", "_"),
-    levels = c("normal", "DPG", "EE", "DPG_EE")
+    levels = c("normal", "GPD", "EE", "GPD_EE")
   )
   
   counts_table <- t(phylo.rank@otu_table@.Data)
@@ -672,9 +672,9 @@ da_lv <- map_df(rank_list, \(.rank) {
   fit <- lmFit(voomvoom, design_matrix) %>% 
     eBayes()
   res <- c(
-    "endoscopiaDPG",
+    "endoscopiaGPD",
     "endoscopiaEE",
-    "endoscopiaDPG_EE"
+    "endoscopiaGPD_EE"
   ) %>% 
     set_names(.) %>% 
     map_df(
@@ -706,7 +706,7 @@ da_lv <- map_df(rank_list, \(.rank) {
         x == "bac",
         x,
         paste0(
-          str_extract(x, "DPG_EE|DPG|EE"),
+          str_extract(x, "GPD_EE|GPD|EE"),
           "_vs_normal",
           ifelse(
             str_detect(x, "estimate"),
@@ -745,7 +745,7 @@ dp_res <- map_df(rank_list, \(.rank) {
   )
   phylo.rank@sam_data$endoscopia <- factor(
     str_replace(phylo.rank@sam_data$endoscopia, "\\+", "_"),
-    levels = c("normal", "DPG", "EE", "DPG_EE")
+    levels = c("normal", "GPD", "EE", "GPD_EE")
   )
   taxa_list <- taxa_names(phylo.rank) %>% 
     set_names(.)
@@ -772,7 +772,7 @@ dp_res <- map_df(rank_list, \(.rank) {
         names_from = term,
         values_from = c(estimate, pval),
         names_repair = function(x) paste0(
-          str_extract(x, "DPG_EE|DPG|EE"),
+          str_extract(x, "GPD_EE|GPD|EE"),
           "_vs_normal",
           ifelse(
             str_detect(x, "estimate"),
@@ -788,8 +788,8 @@ dp_res <- map_df(rank_list, \(.rank) {
     rename_with(~str_replace(., 'pval', 'pvalue')) %>% 
     mutate(
       lrt_padj = p.adjust(lrt_pvalue, method = "BH"),
-      DPG_vs_normal_padj = p.adjust(DPG_vs_normal_pvalue, method = "BH"),
-      DPG_EE_vs_normal_padj = p.adjust(DPG_EE_vs_normal_pvalue, method = "BH"),
+      GPD_vs_normal_padj = p.adjust(GPD_vs_normal_pvalue, method = "BH"),
+      GPD_EE_vs_normal_padj = p.adjust(GPD_EE_vs_normal_pvalue, method = "BH"),
       EE_vs_normal_padj = p.adjust(EE_vs_normal_pvalue, method = "BH")
     )
 }, .id = "tax_rank") %>% 
@@ -814,7 +814,7 @@ da_linda <- map_df(rank_list, \(.rank) {
   )
   phylo.rank@sam_data$endoscopia <- factor(
     str_replace(phylo.rank@sam_data$endoscopia, "\\+", "_"),
-    levels = c("normal", "DPG", "EE", "DPG_EE")
+    levels = c("normal", "GPD", "EE", "GPD_EE")
   )
 
   .meta_data <- data.frame(phylo.rank@sam_data)
@@ -852,7 +852,7 @@ da_linda <- map_df(rank_list, \(.rank) {
         x == "bac",
         x,
         paste0(
-          str_extract(x, "DPG_EE|DPG|EE"),
+          str_extract(x, "GPD_EE|GPD|EE"),
           "_vs_normal",
           ifelse(
             str_detect(x, "estimate"),
@@ -903,13 +903,13 @@ df <- all_res %>%
 p1 <- df %>%
   mutate(
     sig = ifelse(
-      DPG_vs_normal_padj< 0.1 & lrt_padj < .1,
+      GPD_vs_normal_padj< 0.1 & lrt_padj < .1,
       "Significant at FDR 10%",
       "Not significant at FDR 10%"
     )
   ) %>% 
   na.omit() %>% 
-  ggplot(aes(DPG_vs_normal, -log10(DPG_vs_normal_pvalue))) +
+  ggplot(aes(GPD_vs_normal, -log10(GPD_vs_normal_pvalue))) +
   ggrepel::geom_text_repel(
     aes(label = str_replace_all(bac, "_", " ")),
     data = . %>% filter(!str_detect(sig, "Not"))
@@ -919,7 +919,7 @@ p1 <- df %>%
     color = NULL,
     x = NULL,
     y = "-log10(p-value)",
-    title = "DPG vs normal"
+    title = "GPD vs normal"
   ) +
   facet_wrap(~tool, ncol = 5) +
   coord_cartesian(xlim = c(-3, 3), ylim = c(0, 5)) +
@@ -951,13 +951,13 @@ p2 <- df %>%
 p3 <- df %>%
   mutate(
     sig = ifelse(
-      DPG_EE_vs_normal_padj< 0.1 & lrt_padj < .1,
+      GPD_EE_vs_normal_padj< 0.1 & lrt_padj < .1,
       "Significant at FDR 10%",
       "Not significant at FDR 10%"
     )
   ) %>% 
   na.omit() %>% 
-  ggplot(aes(DPG_EE_vs_normal, -log10(DPG_EE_vs_normal_pvalue))) +
+  ggplot(aes(GPD_EE_vs_normal, -log10(GPD_EE_vs_normal_pvalue))) +
   ggrepel::geom_text_repel(
     aes(label = str_replace_all(bac, "_", " ")),
     data = . %>% filter(!str_detect(sig, "Not")),
@@ -968,7 +968,7 @@ p3 <- df %>%
     color = NULL,
     x = "log2FC",
     y = "-log10(p-value)",
-    title = "DPG+EE vs normal"
+    title = "GPD+EE vs normal"
   ) +
   facet_wrap(~tool, ncol = 5) +
   coord_cartesian(xlim = c(-3, 3), ylim = c(0, 5))
